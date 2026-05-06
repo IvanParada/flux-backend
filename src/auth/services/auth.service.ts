@@ -86,7 +86,7 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.userRepository.findOne({
       where: { email: dto.email },
-      select: ['id', 'email', 'password', 'isEmailVerified'],
+      select: ['id', 'email', 'password', 'isEmailVerified', 'rut'],
     });
 
     if (!user) {
@@ -102,10 +102,16 @@ export class AuthService {
       throw new UnauthorizedException('PENDING_VERIFICATION');
     }
 
-    const payload = { id: user.id, email: user.email };
+    const payload = { id: user.id, email: user.email, rut: user.rut };
     const token = this.jwtService.sign(payload);
-
-    return { token };
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        rut: user.rut,
+      },
+    };
   }
 
   async forgotPassword(email: string) {

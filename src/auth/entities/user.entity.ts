@@ -30,6 +30,18 @@ export class User {
   @Column({ type: 'text', nullable: true })
   passwordResetCode: string | null;
 
+  @Column({ name: 'bank_holder_id', nullable: true })
+  bank_holder_id: string;
+
+  @Column({ name: 'bank_number', nullable: true })
+  bank_number: string;
+
+  @Column({ name: 'bank_type', nullable: true })
+  bank_type: string;
+
+  @Column({ name: 'bank_institution_id', nullable: true })
+  bank_institution_id: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

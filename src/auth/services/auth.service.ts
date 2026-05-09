@@ -14,6 +14,7 @@ import { MailService } from './mail.service';
 import { LoginDto } from '../dto/login.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { VerifyResetCodeDto } from '../dto/verify-reset-code.dto';
+import { UpdateBankDataDto } from '../dto/update-bank-data.dto';
 
 @Injectable()
 export class AuthService {
@@ -176,5 +177,22 @@ export class AuthService {
     await this.mailService.sendVerificationEmail(email, newCode);
 
     return { message: 'NEW_CODE_SENT' };
+  }
+
+  async updateBankData(userId: string, dto: UpdateBankDataDto) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new UnauthorizedException('USER_NOT_FOUND');
+    }
+
+    user.bank_holder_id = dto.bank_holder_id;
+    user.bank_number = dto.bank_number;
+    user.bank_type = dto.bank_type;
+    user.bank_institution_id = dto.bank_institution_id;
+
+    await this.userRepository.save(user);
+
+    return { message: 'BANK_DATA_UPDATED_SUCCESSFULLY' };
   }
 }

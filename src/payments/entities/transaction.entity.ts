@@ -7,13 +7,7 @@ import {
   ManyToOne,
   Index,
 } from 'typeorm';
-
-export enum TransactionStatus {
-  PENDING = 'pending',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  CANCELLED = 'cancelled',
-}
+import { TransactionStatus } from '../enums/transaction-status.enum';
 
 @Entity('transactions')
 export class Transaction {

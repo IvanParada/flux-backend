@@ -8,6 +8,7 @@ import { TransactionStatus } from './enums/transaction-status.enum';
 import { Transaction } from './entities/transaction.entity';
 import { User } from 'src/auth/entities/user.entity';
 import { PaymentsGateway } from './gateway/payments.gateway';
+import { UpdateBankDataDto } from './dto/update-bank-data.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -38,6 +39,17 @@ export class PaymentsService {
           : 'NO CONFIGURADO'
       }`,
     );
+  }
+
+  async updateUserBankData(userId: string, data: UpdateBankDataDto) {
+    await this.userRepository.update(userId, {
+      bank_holder_id: data.bank_holder_id,
+      bank_number: data.bank_number,
+      bank_type: data.bank_type,
+      bank_institution_id: data.bank_institution_id,
+    });
+
+    return { message: 'BANK_DATA_UPDATED_SUCCESSFULLY' };
   }
 
   async createPaymentLink(userId: string, amount: number, description: string) {

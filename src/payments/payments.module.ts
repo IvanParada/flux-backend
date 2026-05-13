@@ -7,9 +7,14 @@ import { ConfigModule } from '@nestjs/config';
 import { PaymentsGateway } from './gateway/payments.gateway';
 
 import { User } from 'src/auth/entities/user.entity';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Transaction, User]), ConfigModule],
+  imports: [
+    TypeOrmModule.forFeature([Transaction, User]),
+    ConfigModule,
+    AuthModule,
+  ],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentsGateway],
   exports: [PaymentsService, PaymentsGateway],

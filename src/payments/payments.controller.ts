@@ -61,6 +61,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @Patch('set-bank-data')
   async updateBankData(@Req() req, @Body() dto: UpdateBankDataDto) {
+    console.log('REQ USER:', req.user);
     return await this.paymentsService.updateUserBankData(req.user.userId, dto);
   }
 }

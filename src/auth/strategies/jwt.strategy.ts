@@ -9,7 +9,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
 
     if (!jwtSecret) {
-      throw new Error('JWT_SECRET no está definido en las variables de entorno');
+      throw new Error(
+        'JWT_SECRET no está definido en las variables de entorno',
+      );
     }
 
     super({
@@ -20,6 +22,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    return { userId: payload.sub, email: payload.email };
+    return { userId: payload.id, email: payload.email, rut: payload.rut };
   }
 }

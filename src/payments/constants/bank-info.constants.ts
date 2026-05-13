@@ -15,6 +15,5 @@ export const CHILEAN_BANKS: BankConstant[] = [
 
 export const ACCOUNT_TYPES: BankConstant[] = [
   { id: 'checking_account', name: 'Cuenta Corriente' },
-  { id: 'vista_account', name: 'Cuenta Vista / RUT' },
-  { id: 'savings_account', name: 'Cuenta de Ahorro' },
+  { id: 'sight_account', name: 'Cuenta Vista / RUT' },
 ];

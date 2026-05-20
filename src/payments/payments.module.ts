@@ -8,10 +8,11 @@ import { PaymentsGateway } from './gateway/payments.gateway';
 
 import { User } from 'src/auth/entities/user.entity';
 import { AuthModule } from 'src/auth/auth.module';
+import { Payment } from './entities/payment.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Transaction, User]),
+    TypeOrmModule.forFeature([Transaction, Payment, User]),
     ConfigModule,
     AuthModule,
   ],

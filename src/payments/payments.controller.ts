@@ -23,6 +23,7 @@ export class PaymentsController {
 
   @Post('create-payment')
   async createPaymentLink(@Body() createPaymentDto: CreatePaymentDto) {
+    console.log('createPaymentDto', createPaymentDto);
     return await this.paymentsService.createPaymentLink(
       createPaymentDto.userId,
       createPaymentDto.amount,

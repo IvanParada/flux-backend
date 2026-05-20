@@ -6,8 +6,12 @@ import {
   CreateDateColumn,
   ManyToOne,
   Index,
+  JoinColumn,
+  UpdateDateColumn,
+  OneToOne,
 } from 'typeorm';
 import { TransactionStatus } from '../enums/transaction-status.enum';
+import { Payment } from './payment.entity';
 
 @Entity('transactions')
 export class Transaction {
@@ -28,15 +32,28 @@ export class Transaction {
   status: TransactionStatus;
 
   @Index()
-  @Column({ unique: true })
+  @Column({ name: 'external_reference', unique: true })
   externalReference: string;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ name: 'payment_url', type: 'text', nullable: true })
   paymentUrl: string;
 
-  @CreateDateColumn()
+  @Column({ name: 'fintoc_payment_intent_id', nullable: true })
+  fintocPaymentIntentId?: string;
+
+  @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
+  paidAt?: Date;
+
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+
   @ManyToOne(() => User, (user) => user.transactions, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_id' })
   user: User;
+
+  @OneToOne(() => Payment, (payment) => payment.transaction)
+  payment: Payment;
 }

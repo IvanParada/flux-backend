@@ -9,6 +9,8 @@ import { Transaction } from './entities/transaction.entity';
 import { User } from 'src/auth/entities/user.entity';
 import { PaymentsGateway } from './gateway/payments.gateway';
 import { UpdateBankDataDto } from './dto/update-bank-data.dto';
+import { Payment } from './entities/payment.entity';
+import { PaymentStatus } from './enums/payment-status.enum';
 
 @Injectable()
 export class PaymentsService {
@@ -17,6 +19,8 @@ export class PaymentsService {
   private readonly webhookSecret: string;
 
   constructor(
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Transaction)
     private readonly transactionRepository: Repository<Transaction>,
     @InjectRepository(User)
@@ -33,10 +37,9 @@ export class PaymentsService {
     const secret = this.webhookSecret.trim();
 
     this.logger.log(
-      `FINTOC_WEBHOOK_SECRET: ${
-        secret
-          ? `${secret.slice(0, 6)}...${secret.slice(-6)} length=${secret.length}`
-          : 'NO CONFIGURADO'
+      `FINTOC_WEBHOOK_SECRET: ${secret
+        ? `${secret.slice(0, 6)}...${secret.slice(-6)} length=${secret.length}`
+        : 'NO CONFIGURADO'
       }`,
     );
   }
@@ -53,78 +56,54 @@ export class PaymentsService {
   }
 
   async createPaymentLink(userId: string, amount: number, description: string) {
-    try {
-      const externalReference = uuidv4();
+    const externalReference = uuidv4();
 
-      const baseUrl = this.configService.get<string>('BASE_URL');
+    const baseUrl = this.configService.get<string>('BASE_URL');
+    if (!baseUrl) throw new Error('BASE_URL no está configurado');
 
-      if (!baseUrl) throw new Error('BASE_URL no está configurado');
+    const seller = await this.userRepository.findOne({
+      where: { id: userId },
+    });
 
-      const seller = await this.userRepository.findOne({
-        where: { id: userId },
-      });
-
-      if (!seller) {
-        throw new NotFoundException('Vendedor no encontrado');
-      }
-
-      if (
-        !seller.bank_holder_id ||
-        !seller.bank_number ||
-        !seller.bank_type ||
-        !seller.bank_institution_id
-      ) {
-        throw new Error(
-          'El vendedor no tiene configurados todos sus datos bancarios para recibir pagos',
-        );
-      }
-
-      const sellerBankData = {
-        holder_id: seller.bank_holder_id,
-        number: seller.bank_number,
-        type: seller.bank_type,
-        institution_id: seller.bank_institution_id,
-      };
-
-      const session = await this.client.checkoutSessions.create({
-        amount: Math.round(amount),
-        currency: 'CLP',
-        name: description,
-        success_url: `${baseUrl}/success`,
-        cancel_url: `${baseUrl}/payment-failed`,
-        recipient_account: sellerBankData,
-        metadata: {
-          external_reference: externalReference,
-        },
-      });
-
-      const paymentUrl = session.payment_url;
-
-      this.logger.log(`Checkout Session creada: ${paymentUrl}`);
-
-      if (!paymentUrl) {
-        throw new Error('Fintoc no devolvió URL de pago (Checkout Session)');
-      }
-
-      const newTx = this.transactionRepository.create({
-        amount,
-        description,
-        externalReference,
-        paymentUrl: paymentUrl,
-        status: TransactionStatus.PENDING,
-        user: { id: userId } as any,
-      });
-
-      await this.transactionRepository.save(newTx);
-
-      return {
-        url: paymentUrl,
-        reference: externalReference,
-      };
-    } catch (error) {
-      this.logger.error('Error creando link de pago Fintoc', error);
-      throw error;
+    if (!seller) {
+      throw new NotFoundException('Vendedor no encontrado');
     }
+
+    const transaction = this.transactionRepository.create({
+      amount: Math.round(amount),
+      description,
+      externalReference,
+      status: TransactionStatus.PENDING,
+      user: { id: userId } as any,
+    });
+
+    await this.transactionRepository.save(transaction);
+
+    const session = await this.client.checkoutSessions.create({
+      amount: Math.round(amount),
+      currency: 'CLP',
+      name: description,
+      success_url: `${baseUrl}/success`,
+      cancel_url: `${baseUrl}/payment-failed`,
+      metadata: {
+        external_reference: externalReference,
+        seller_id: userId,
+      },
+    });
+
+    const paymentUrl = (session as any).redirect_url;
+
+    if (!paymentUrl) {
+      throw new Error('Fintoc no devolvió URL de pago');
+    }
+
+    transaction.paymentUrl = paymentUrl;
+    await this.transactionRepository.save(transaction);
+
+    return {
+      url: paymentUrl,
+      reference: externalReference,
+    };
   }
 
   async processWebhook(fintocSignature: string, rawBody: string, body: any) {
@@ -148,56 +127,34 @@ export class PaymentsService {
 
       this.logger.log(`Firma validada. Evento: ${body.type}`);
 
-      if (
-        body.type === 'payment_intent.succeeded' ||
-        body.type === 'charge.succeeded' ||
-        body.type === 'checkout_session.succeeded'
-      ) {
-        const externalReference =
-          body.data?.metadata?.external_reference ||
-          body.data?.payment_intent?.metadata?.external_reference;
+      const externalReference = this.extractExternalReference(body);
 
-        if (!externalReference) {
-          this.logger.error(
-            'No se encontró external_reference en el webhook data',
+      switch (body.type) {
+        case 'payment_intent.succeeded':
+          return await this.handlePaymentSucceeded(body, externalReference);
+
+        case 'payment_intent.failed':
+          return await this.handlePaymentFailed(body, externalReference);
+
+        case 'checkout_session.finished':
+          this.logger.log(
+            `Checkout session finalizada: ${body.data?.id}. Esperando/ignorando confirmación final.`,
           );
+
           return {
             received: true,
             ignored: true,
-            reason: 'missing_external_reference',
+            reason: 'checkout_session_finished_not_final_confirmation',
           };
-        }
 
-        const transaction = await this.transactionRepository.findOne({
-          where: { externalReference },
-        });
-
-        if (!transaction) {
-          this.logger.error(`Transacción ${externalReference} no encontrada.`);
+        default:
           return {
             received: true,
             ignored: true,
-            reason: 'transaction_not_found',
+            reason: 'unhandled_event_type',
+            eventType: body.type,
           };
-        }
-
-        if (transaction.status === TransactionStatus.APPROVED) {
-          this.logger.log(`Pago ya estaba aprobado. Evitando duplicados.`);
-          return transaction;
-        }
-
-        transaction.status = TransactionStatus.APPROVED;
-        const updatedTx = await this.transactionRepository.save(transaction);
-
-        this.paymentsGateway.notifyPaymentUpdate(
-          updatedTx.externalReference,
-          updatedTx.status,
-        );
-
-        return updatedTx;
       }
-
-      return { received: true, ignored: true, reason: 'unhandled_event_type' };
     } catch (error) {
       this.logger.error(
         `Error procesando webhook de Fintoc: ${error.message}`,
@@ -211,4 +168,162 @@ export class PaymentsService {
       };
     }
   }
+
+  private extractExternalReference(body: any): string | null {
+    return (
+      body.data?.metadata?.external_reference ||
+      body.data?.payment_resource?.payment_intent?.metadata?.external_reference ||
+      body.data?.payment_intent?.metadata?.external_reference ||
+      null
+    );
+  }
+
+  private async handlePaymentSucceeded(body: any, externalReference: string | null) {
+    const paymentIntentId = body.data?.id;
+
+    this.logger.log(`[SUCCESS] paymentIntentId=${paymentIntentId}`);
+    this.logger.log(`[SUCCESS] externalReference=${externalReference}`);
+
+    if (!paymentIntentId || !externalReference) {
+      this.logger.error('[SUCCESS] Faltan datos requeridos');
+
+      return {
+        received: true,
+        ignored: true,
+        reason: 'missing_required_data',
+      };
+    }
+
+    const transaction = await this.transactionRepository.findOne({
+      where: { externalReference },
+      relations: ['user'],
+    });
+
+    this.logger.log(`[SUCCESS] transaction encontrada=${!!transaction}`);
+    this.logger.log(`[SUCCESS] transaction id=${transaction?.id}`);
+    this.logger.log(`[SUCCESS] user cargado=${!!transaction?.user}`);
+
+    if (!transaction) {
+      return {
+        received: true,
+        ignored: true,
+        reason: 'transaction_not_found',
+      };
+    }
+
+    const existingPayment = await this.paymentRepository.findOne({
+      where: { fintocPaymentIntentId: paymentIntentId },
+    });
+
+    if (existingPayment) {
+      this.logger.log(`[SUCCESS] payment duplicado id=${existingPayment.id}`);
+
+      return {
+        received: true,
+        duplicated: true,
+        paymentId: existingPayment.id,
+      };
+    }
+
+    const paidAt = body.data?.transaction_date
+      ? new Date(body.data.transaction_date)
+      : new Date();
+
+    transaction.status = TransactionStatus.APPROVED;
+    transaction.fintocPaymentIntentId = paymentIntentId;
+    transaction.paidAt = paidAt;
+
+    await this.transactionRepository.save(transaction);
+
+    this.logger.log('[SUCCESS] creando payment...');
+
+    const payment = this.paymentRepository.create({
+      externalReference,
+      fintocPaymentIntentId: paymentIntentId,
+      amount: body.data?.amount ?? transaction.amount,
+      currency: body.data?.currency ?? 'CLP',
+      description: transaction.description ?? null,
+      status: PaymentStatus.SUCCESS,
+      paidAt,
+      user: transaction.user,
+      transaction,
+    });
+
+    const savedPayment = await this.paymentRepository.save(payment);
+
+    this.logger.log(`[SUCCESS] payment creado id=${savedPayment.id}`);
+
+    this.paymentsGateway.notifyPaymentUpdate(
+      externalReference,
+      TransactionStatus.APPROVED,
+    );
+
+    this.logger.log(`Pago aprobado: ${externalReference}`);
+
+    return {
+      received: true,
+      created: true,
+      paymentId: savedPayment.id,
+      amount: savedPayment.amount,
+    };
+  }
+
+  private async handlePaymentFailed(body: any, externalReference: string | null) {
+    if (!externalReference) {
+      this.logger.error('No se encontró external_reference en payment_intent.failed');
+
+      return {
+        received: true,
+        ignored: true,
+        reason: 'missing_external_reference',
+      };
+    }
+
+    const transaction = await this.transactionRepository.findOne({
+      where: { externalReference },
+    });
+
+    if (!transaction) {
+      this.logger.error(`Transacción ${externalReference} no encontrada.`);
+
+      return {
+        received: true,
+        ignored: true,
+        reason: 'transaction_not_found',
+      };
+    }
+
+    if (transaction.status === TransactionStatus.APPROVED) {
+      this.logger.warn(
+        `Llegó payment_intent.failed para una transacción ya aprobada: ${externalReference}`,
+      );
+
+      return {
+        received: true,
+        ignored: true,
+        reason: 'already_approved',
+        status: transaction.status,
+        externalReference,
+      };
+    }
+
+    transaction.status = TransactionStatus.REJECTED;
+
+    const updatedTx = await this.transactionRepository.save(transaction);
+
+    this.paymentsGateway.notifyPaymentUpdate(
+      updatedTx.externalReference,
+      updatedTx.status,
+    );
+
+    this.logger.warn(`Pago rechazado: ${externalReference}`);
+
+    return {
+      received: true,
+      updated: true,
+      status: updatedTx.status,
+      externalReference: updatedTx.externalReference,
+    };
+  }
+
 }

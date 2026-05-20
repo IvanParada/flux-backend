@@ -1,4 +1,5 @@
 import { Transaction } from 'src/payments/entities/transaction.entity';
+import { Payment } from 'src/payments/entities/payment.entity';
 import {
   Entity,
   Column,
@@ -42,9 +43,12 @@ export class User {
   @Column({ name: 'bank_institution_id', nullable: true })
   bank_institution_id: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
   @OneToMany(() => Transaction, (transaction) => transaction.user)
   transactions: Transaction[];
+
+  @OneToMany(() => Payment, (payment) => payment.user)
+  payments: Payment[];
 }
